@@ -47,6 +47,8 @@ class ConvNeuralNet(nn.Module):
 
         return input
 
+        
+
 # function to prepare and randomize the data
 def PrepareData(letters, numbers, lettersTruths, numbersTruths):
 
@@ -54,10 +56,16 @@ def PrepareData(letters, numbers, lettersTruths, numbersTruths):
     complete_dataset = torch.cat([letters, numbers])
     complete_truths = torch.cat([lettersTruths, numbersTruths])
 
+    size = letters.shape[0] + numbers.shape[0]
+    final_truths = torch.zeros(size, 36)
+    for i in range(size):
+
+        final_truths[i][int(complete_truths[i])] = 1
+
     # shuffle the images and truths datasets in the same order
     permutation = torch.randperm(len(complete_dataset)).tolist()
-    shuffled_images = torch.utils.Subset(complete_dataset, permutation)
-    shuffled_truths = torch.utils.Subset(complete_truths, permutation)
+    shuffled_images = torch.utils.data.Subset(complete_dataset, permutation)
+    shuffled_truths = torch.utils.data.Subset(final_truths, permutation)
 
     # load the data into dataloaders for simplicity
     imageDataLoader = torch.utils.data.DataLoader(shuffled_images, batch_size = 10, shuffle = False)
@@ -71,19 +79,65 @@ if __name__ == "__main__":
     letters, labels = extract_training_samples('letters')
     (x_train, y_train), (x_test, y_test) = tf.keras.datasets.mnist.load_data()
 
-    # Change the data and truths into torch tensors
-    tensor_x_train = torch.from_numpy(x_train)
-    tensor_letters = torch.from_numpy(letters)
+    # Change the data and truths into torch tensors and apply the unsqueeze method
+    # to the datasets to add another dimension for the number of channels
+    tensor_x_train = torch.from_numpy(x_train).unsqueeze(1)
+    tensor_letters = torch.from_numpy(letters).unsqueeze(1)
     tensor_y_train = torch.from_numpy(y_train)
-    tensor_labels = torch.from_numpy(labels)
+    tensor_labels = torch.from_numpy(labels) + 9
+
+    if torch.cuda.is_available():
+
+        tensor_x_train = tensor_x_train.cuda()
+        tensor_letters = tensor_letters.cuda()
+        tensor_y_train = tensor_y_train.cuda()
+        tensor_labels = tensor_labels.cuda()
+    
+    # define the data size, the batch size and the number of epochs
+    dataSize = len(x_train) + len(letters)
+    batchSize = 10
+    epochs = 10
 
     # retrieve the corresponding dataloaders for the ground truths and the images datasets
-    PrepareData(tensor_letters, tensor_x_train, tensor_labels, tensor_y_train)
+    imageDataLoader, truthsDataLoader = PrepareData(tensor_letters, tensor_x_train, tensor_labels, tensor_y_train)
 
     # define the neural network
     neuralNet = ConvNeuralNet()
+    neuralNet = neuralNet.float()
 
     # define the optimizer
     optimizer = torch.optim.Adam(neuralNet.parameters(), lr = 0.09)
+
+    # !! begin the training !!
+    imageBatch = next(iter(imageDataLoader))
+    truthBatch = next(iter(truthsDataLoader))
+
+    criterion = nn.MSELoss()
+
+    print("shape of batch: ", imageBatch.shape)
+    for i in range(epochs):
+
+        for k in range(int(dataSize / batchSize)):
+
+            # zero out the gradient
+            optimizer.zero_grad()
+
+            prediction = neuralNet.forward(imageBatch.float())
+            loss = criterion(prediction, truthBatch)
+            loss.backward()
+
+            optimizer.step()
+
+    # Prepare the test case data for torch network
+    x_test = torch.from_numpy(x_test)
+
+    # Run one test case through the newly trained neural network
+    result = neuralNet.Test(x_test[0])
+    for i in range(36):
+
+        print("Prediction of ", i,": ", result[i])
+
+    print("Ground Truth: ", y_test[0])
+    print("Loss: ", loss.item())
 
     print(neuralNet)
