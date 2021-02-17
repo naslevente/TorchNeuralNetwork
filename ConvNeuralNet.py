@@ -15,39 +15,46 @@ import tensorflow as tf
 from emnist import extract_training_samples
 from emnist import extract_test_samples
 import csv
+import torch.nn.functional as Func
 
 class ConvNeuralNet(nn.Module):
 
     def __init__(self):
 
-        super().__init__()
+        super(ConvNeuralNet, self).__init__()
 
-        self.cnnLayers = nn.Sequential(
+        # input image with 1 channel with 6 output channels and a 3x3 kernel filter
+        self.conv1 = nn.Conv2d(1, 6, 3)
+        self.conv2 = nn.Conv2d(6, 16, 3)
 
-            # First convolutional layer
-            nn.Conv2d(1, 4, kernel_size = 3, stride = 1, padding = 1),
-            nn.BatchNorm2d(4),
-            nn.Sigmoid(),
-            nn.MaxPool2d(kernel_size = 2, stride = 2),
+        self.linear1 = nn.Linear(16 * 5 * 5, 120)
+        self.linear2 = nn.Linear(120, 84)
 
-            # Second convolutional layer
-            nn.Conv2d(4, 4, kernel_size = 3, stride = 1, padding = 1),
-            nn.BatchNorm2d(4),
-            nn.Sigmoid(),
-            nn.MaxPool2d(kernel_size = 2, stride = 2))
-
-        self.linearLayers = nn.Sequential(nn.Linear(4 * 7 * 7, 36))
+        # change 10 to 36 if the network is training on both the letters and the numbers
+        self.linear3 = nn.Linear(84, 10)
     
-    # feed-forward
     def forward(self, input):
 
-        input = self.cnnLayers(input)
-        input = input.view(input.size(0), -1)
-        input = self.linearLayers(input)
+        input = Func.max_pool2d(torch.sigmoid(self.conv1(input)), (2, 2))
+        input = Func.max_pool2d(torch.sigmoid(self.conv2(input)), 2)
+
+        input = input.view(-1, self.num_flat_features(input))
+        input = torch.sigmoid(self.linear1(input))
+        input = torch.sigmoid(self.linear2(input))
+        input = self.linear3(input)
 
         return input
-
         
+    def num_flat_features(self, input):
+
+        size = input.size()[1:]
+        num_features = 1
+        for i in size:
+
+            num_features *= i
+        
+        return num_features
+
 
 # function to prepare and randomize the data
 def PrepareData(letters, numbers, lettersTruths, numbersTruths):
@@ -93,51 +100,101 @@ if __name__ == "__main__":
         tensor_y_train = tensor_y_train.cuda()
         tensor_labels = tensor_labels.cuda()
     
-    # define the data size, the batch size and the number of epochs
-    dataSize = len(x_train) + len(letters)
+    # define the data size, the batch size, learning rate and the number of epochs
+    dataSize = len(x_train)
     batchSize = 10
-    epochs = 10
+    learningRate = 0.2
+    epochs = 15
+
+    # convert the truth data into applicable tensor data
+    size = tensor_x_train.shape[0]
+    final_truths = torch.zeros(size, 10)
+    for i in range(size):
+
+        final_truths[i][int(y_train[i])] = 1
 
     # retrieve the corresponding dataloaders for the ground truths and the images datasets
-    imageDataLoader, truthsDataLoader = PrepareData(tensor_letters, tensor_x_train, tensor_labels, tensor_y_train)
+    #imageDataLoader, truthsDataLoader = PrepareData(tensor_letters, tensor_x_train, tensor_labels, tensor_y_train)
+    permutation = torch.randperm(len(tensor_x_train)).tolist()
+    shuffled_images = torch.utils.data.Subset(tensor_x_train, permutation)
+    shuffled_truths = torch.utils.data.Subset(final_truths, permutation)
+
+    imageDataLoader = torch.utils.data.DataLoader(shuffled_images, batch_size = 10, shuffle = False)
+    truthsDataLoader = torch.utils.data.DataLoader(shuffled_truths, batch_size = 10, shuffle = False)
 
     # define the neural network
     neuralNet = ConvNeuralNet()
     neuralNet = neuralNet.float()
 
     # define the optimizer
-    optimizer = torch.optim.Adam(neuralNet.parameters(), lr = 0.09)
+    #optimizer = torch.optim.Adam(neuralNet.parameters(), lr = 0.09)
 
     # !! begin the training !!
-    imageBatch = next(iter(imageDataLoader))
-    truthBatch = next(iter(truthsDataLoader))
 
+    # create iterators for the dataloaders
+    imageBatchIterator = iter(imageDataLoader)
+    truthBatchIterator = iter(truthsDataLoader)
+
+    # define the loss function used
     criterion = nn.MSELoss()
 
-    print("shape of batch: ", imageBatch.shape)
+    # setup the test cases 
+    x_test = torch.from_numpy(x_test)
+
+    testCase = x_test[0]
+    testCase = testCase.unsqueeze(0).unsqueeze(0).float()
+
+    # all the weights of the neural network
+    params = list(neuralNet.parameters())
+    print("initial weights: ", params[0])
+
     for i in range(epochs):
+
+        # pick out the first image and respective truth
+        imageBatch = next(imageBatchIterator)
+        truthBatch = next(truthBatchIterator)
 
         for k in range(int(dataSize / batchSize)):
 
             # zero out the gradient
-            optimizer.zero_grad()
+            #optimizer.zero_grad()
+            neuralNet.zero_grad()
 
             prediction = neuralNet.forward(imageBatch.float())
             loss = criterion(prediction, truthBatch)
             loss.backward()
 
-            optimizer.step()
+            #optimizer.step()
+            # update the weights of the network
+            for i in neuralNet.parameters():
 
-    # Prepare the test case data for torch network
-    x_test = torch.from_numpy(x_test)
+                i.data.sub_(i.grad.data * learningRate)
+
+            try:
+
+                # set the current batches of data using iterator
+                imageBatch = next(imageBatchIterator)
+                truthBatch = next(truthBatchIterator)
+            
+            except StopIteration:
+
+                imageBatchIterator = iter(imageDataLoader)
+                truthBatchIterator = iter(truthsDataLoader)
+
 
     # Run one test case through the newly trained neural network
-    result = neuralNet.Test(x_test[0])
+    result = neuralNet.forward(testCase)
+
+    print("result: ", result)
+    print("loss: ", loss.item())
+
+    '''
     for i in range(36):
 
         print("Prediction of ", i,": ", result[i])
 
     print("Ground Truth: ", y_test[0])
-    print("Loss: ", loss.item())
+    #print("Loss: ", loss.item())
+    '''
 
     print(neuralNet)
