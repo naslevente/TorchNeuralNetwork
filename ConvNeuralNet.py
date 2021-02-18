@@ -31,7 +31,7 @@ class ConvNeuralNet(nn.Module):
         self.linear2 = nn.Linear(120, 84)
 
         # change 10 to 36 if the network is training on both the letters and the numbers
-        self.linear3 = nn.Linear(84, 10)
+        self.linear3 = nn.Linear(84, 36)
     
     def forward(self, input):
 
@@ -101,26 +101,28 @@ if __name__ == "__main__":
         tensor_labels = tensor_labels.cuda()
     
     # define the data size, the batch size, learning rate and the number of epochs
-    dataSize = len(x_train)
+    dataSize = len(x_train) + len(letters)
     batchSize = 10
-    learningRate = 0.2
+    learningRate = 0.6
     epochs = 15
 
+    '''
     # convert the truth data into applicable tensor data
     size = tensor_x_train.shape[0]
     final_truths = torch.zeros(size, 10)
     for i in range(size):
 
         final_truths[i][int(y_train[i])] = 1
+    '''
 
     # retrieve the corresponding dataloaders for the ground truths and the images datasets
-    #imageDataLoader, truthsDataLoader = PrepareData(tensor_letters, tensor_x_train, tensor_labels, tensor_y_train)
-    permutation = torch.randperm(len(tensor_x_train)).tolist()
-    shuffled_images = torch.utils.data.Subset(tensor_x_train, permutation)
-    shuffled_truths = torch.utils.data.Subset(final_truths, permutation)
+    imageDataLoader, truthsDataLoader = PrepareData(tensor_letters, tensor_x_train, tensor_labels, tensor_y_train)
+    #permutation = torch.randperm(len(tensor_x_train)).tolist()
+    #shuffled_images = torch.utils.data.Subset(tensor_x_train, permutation)
+    #shuffled_truths = torch.utils.data.Subset(final_truths, permutation)
 
-    imageDataLoader = torch.utils.data.DataLoader(shuffled_images, batch_size = 10, shuffle = False)
-    truthsDataLoader = torch.utils.data.DataLoader(shuffled_truths, batch_size = 10, shuffle = False)
+    #imageDataLoader = torch.utils.data.DataLoader(shuffled_images, batch_size = 10, shuffle = False)
+    #truthsDataLoader = torch.utils.data.DataLoader(shuffled_truths, batch_size = 10, shuffle = False)
 
     # define the neural network
     neuralNet = ConvNeuralNet()
@@ -140,7 +142,6 @@ if __name__ == "__main__":
 
     # setup the test cases 
     x_test = torch.from_numpy(x_test)
-
     testCase = x_test[0]
     testCase = testCase.unsqueeze(0).unsqueeze(0).float()
 
@@ -182,19 +183,21 @@ if __name__ == "__main__":
                 truthBatchIterator = iter(truthsDataLoader)
 
 
-    # Run one test case through the newly trained neural network
+    # run through the first test case which is a number
     result = neuralNet.forward(testCase)
 
     print("result: ", result)
     print("loss: ", loss.item())
 
-    '''
-    for i in range(36):
+    # run through the second test case which is a letter
+    test_letters, test_labels = extract_test_samples('letters')
+    test_letters = torch.from_numpy(test_letters)
+    testCaseTwo = test_letters[0]
+    testCaseTwo = testCaseTwo.unsqueeze(0).unsqueeze(0).float()
+    
+    result = neuralNet.forward(testCaseTwo)
 
-        print("Prediction of ", i,": ", result[i])
-
-    print("Ground Truth: ", y_test[0])
-    #print("Loss: ", loss.item())
-    '''
+    print("result: ", result)
+    print("loss: ", loss.item())
 
     print(neuralNet)
