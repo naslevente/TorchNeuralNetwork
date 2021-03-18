@@ -31,13 +31,17 @@ class ConvNeuralNet(nn.Module):
         self.linear2 = nn.Linear(120, 84)
 
         # change 10 to 36 if the network is training on both the letters and the numbers
-        self.linear3 = nn.Linear(84, 36)
+        self.linear3 = nn.Linear(84, 26)
+        #self.linear3 = nn.Linear(84, 10)
     
     def forward(self, input):
 
         input = Func.max_pool2d(torch.sigmoid(self.conv1(input)), (2, 2))
         input = Func.max_pool2d(torch.sigmoid(self.conv2(input)), 2)
 
+        #print("output shape: ", input.shape)
+
+        num_features = self.num_flat_features(input)
         input = input.view(-1, self.num_flat_features(input))
         input = torch.sigmoid(self.linear1(input))
         input = torch.sigmoid(self.linear2(input))
@@ -54,6 +58,21 @@ class ConvNeuralNet(nn.Module):
             num_features *= i
         
         return num_features
+
+# function to save the resulting weights and biases to csv files
+def WriteToCSV(fileName, data):
+
+    with open(fileName, mode = 'w') as output_file:
+        output_file = csv.writer(output_file, delimiter = ',', quotechar = '"', quoting = csv.QUOTE_MINIMAL)
+
+        for i in range(data.shape[0]):
+
+            for k in range(data.shape[1]):
+
+                for p in range(data.shape[2]):
+
+                    output_file.writerow(data[i][k][p].detach().numpy())
+
 
 
 # function to prepare and randomize the data
@@ -80,6 +99,23 @@ def PrepareData(letters, numbers, lettersTruths, numbersTruths):
 
     return imageDataLoader, groundTruthsDataLoader
 
+def SetupNeuralNetwork(trainingData, truthData):
+
+    tensor_data = torch.from_numpy(trainingData).unsqueeze(1)
+
+    # define the data size, the batch size, learning rate and the number of epochs
+    dataSize = len(trainingData)
+    batchSize = 10
+    learningRate = 0.6
+    epochs = 15
+
+    # convert the truth data into applicable tensor data
+    size = tensor_data.shape[0]
+    final_truths = torch.zeros(size, 10)
+    for i in range(size):
+
+        final_truths[i][int(truthData[i])] = 1
+
 if __name__ == "__main__":
 
     # Load letters and numbers data
@@ -101,28 +137,27 @@ if __name__ == "__main__":
         tensor_labels = tensor_labels.cuda()
     
     # define the data size, the batch size, learning rate and the number of epochs
-    dataSize = len(x_train) + len(letters)
+    dataSize = len(letters)
     batchSize = 10
     learningRate = 0.6
     epochs = 15
 
-    '''
+    
     # convert the truth data into applicable tensor data
-    size = tensor_x_train.shape[0]
-    final_truths = torch.zeros(size, 10)
+    size = tensor_letters.shape[0]
+    final_truths = torch.zeros(size, 26)
     for i in range(size):
 
-        final_truths[i][int(y_train[i])] = 1
-    '''
+        final_truths[i][int(labels[i]) - 1] = 1
 
     # retrieve the corresponding dataloaders for the ground truths and the images datasets
-    imageDataLoader, truthsDataLoader = PrepareData(tensor_letters, tensor_x_train, tensor_labels, tensor_y_train)
-    #permutation = torch.randperm(len(tensor_x_train)).tolist()
-    #shuffled_images = torch.utils.data.Subset(tensor_x_train, permutation)
-    #shuffled_truths = torch.utils.data.Subset(final_truths, permutation)
+    #imageDataLoader, truthsDataLoader = PrepareData(tensor_letters, tensor_x_train, tensor_labels, tensor_y_train)
+    permutation = torch.randperm(len(tensor_letters)).tolist()
+    shuffled_images = torch.utils.data.Subset(tensor_letters, permutation)
+    shuffled_truths = torch.utils.data.Subset(final_truths, permutation)
 
-    #imageDataLoader = torch.utils.data.DataLoader(shuffled_images, batch_size = 10, shuffle = False)
-    #truthsDataLoader = torch.utils.data.DataLoader(shuffled_truths, batch_size = 10, shuffle = False)
+    imageDataLoader = torch.utils.data.DataLoader(shuffled_images, batch_size = 10, shuffle = False)
+    truthsDataLoader = torch.utils.data.DataLoader(shuffled_truths, batch_size = 10, shuffle = False)
 
     # define the neural network
     neuralNet = ConvNeuralNet()
@@ -148,6 +183,9 @@ if __name__ == "__main__":
     # all the weights of the neural network
     params = list(neuralNet.parameters())
     print("initial weights: ", params[0])
+
+    imageBatch = next(imageBatchIterator)
+    prediction = neuralNet.forward(imageBatch.float())
 
     for i in range(epochs):
 
@@ -199,5 +237,32 @@ if __name__ == "__main__":
 
     print("result: ", result)
     print("loss: ", loss.item())
+
+    # run through the third test case which is an actual handwritten six
+    handwrittenSix = plt.imread("ResizedImage2.jpg")
+    handwrittenSix = torch.from_numpy(handwrittenSix)
+
+    handwrittenSix = handwrittenSix.unsqueeze(0).unsqueeze(0).float()
+    result = neuralNet.forward(handwrittenSix)
+    
+    print("result: ", result)
+
+    count = 1
+    fileName = "weights_biases_"
+    for i in params:
+
+        detailedFileName = fileName + str(count) + ".csv"
+
+        param = i
+        print("difference in shape and desired shape: ", str(4 - len(i.shape)))
+        for k in range(4 - len(i.shape)):
+
+            param = param.unsqueeze(0)
+            print("new shape: ", param.shape)
+
+        print("param shape: ", param.shape)
+        WriteToCSV(detailedFileName, param)
+
+        count += 1
 
     print(neuralNet)
